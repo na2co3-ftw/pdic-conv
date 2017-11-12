@@ -1,7 +1,7 @@
 /*
- * pdic-conv.js v0.1
+ * pdic-conv.js v0.2
  *
- * Copyright (c) 2015 na2co3
+ * Copyright (c) 2017 na2co3
  * Released under the MIT License, see:
  * http://opensource.org/licenses/mit-license.php
  */
@@ -27,77 +27,109 @@
  *         圧縮されたバイナリ, 暗号化
  */
 
-var fs = require("fs");
-var bocu1 = require("./bocu1");
+const fs = require("fs");
+const bocu1 = require("./bocu1");
 
-var dicFile, outFile, format = 0, encoding = 0;
-var match;
-if (process.argv[2]) {
-	dicFile = process.argv[2];
-	process.argv.slice(3).forEach(function (arg) {
-		if (arg.substr(0, 1) == "-") {
-			if (arg == "-csv")
-				format = 0;
-			else if (arg == "-text")
-				format = 1;
-			else if (arg == "-1line")
-				format = 2;
-			else if (arg == "-unicode")
-				encoding = 0;
-			else if (arg == "-utf8")
-				encoding = 1;
-		}
-	});
-	if (process.argv[3] && process.argv[3].substr(0, 1) != "-") {
-		outFile = process.argv[3];
-	} else {
-		if (match = dicFile.match(/^(.*)\.[^\\\.]*$/)) {
-			outFile = match[1] + [".csv", ".txt", ".txt"][format];
+function main() {
+	let dicFile, outFile, format = 0, encoding = 0;
+	let match;
+	if (process.argv[2]) {
+		dicFile = process.argv[2];
+		process.argv.slice(3).forEach(function (arg) {
+			if (arg.substr(0, 1) == "-") {
+				if (arg == "-csv")
+					format = 0;
+				else if (arg == "-text")
+					format = 1;
+				else if (arg == "-1line")
+					format = 2;
+				else if (arg == "-unicode")
+					encoding = 0;
+				else if (arg == "-utf8")
+					encoding = 1;
+			}
+		});
+		if (process.argv[3] && process.argv[3].substr(0, 1) != "-") {
+			outFile = process.argv[3];
 		} else {
-			outFile = dicFile + [".csv", ".txt", ".txt"][format];
+			if (match = dicFile.match(/^(.*)\.[^\\\.]*$/)) {
+				outFile = match[1] + [".csv", ".txt", ".txt"][format];
+			} else {
+				outFile = dicFile + [".csv", ".txt", ".txt"][format];
+			}
+		}
+	} else {
+		console.log("node pdic-conv dicFile [outputFile]");
+		process.exit();
+	}
+
+	let ret;
+
+	try {
+		if (format == 0) { // CSV
+			ret = "word,trans,exp,level,memory,modify,pron";
+			readPDIC(dicFile, function (entry) {
+				ret += '\r\n"' + entry.word.replace(/"/g, '""') + '","' +
+					entry.trans.replace(/"/g, '""') + '","' +
+					(entry.exp || "").replace(/"/g, '""') + '",' +
+					(entry.level || 0) + ',' + (entry.memory || 0) + ',' + (entry.modify || 0) + ',"' +
+					(entry.pron || "").replace(/"/g, '""') + '"';
+			});
+		} else if (format == 2) { // 1 line text
+			ret = "";
+			let firstLine = true;
+			readPDIC(dicFile, function (entry) {
+				ret += (firstLine ? "" : "\r\n") + entry.word + " /// " +
+					entry.trans.replace(/\r?\n/g, " \\ ") + " / ";
+				if (entry.exp) {
+					ret += entry.exp.replace(/\r?\n/g, " \\ ");
+				}
+				firstLine = false;
+			});
+		} else { // text
+			ret = "";
+			readPDIC(dicFile, function (entry) {
+				ret += entry.word + "\r\n" + entry.trans;
+				if (entry.exp)
+					ret += " / " + entry.exp;
+				ret += "\r\n";
+			});
+		}
+	} catch(e) {
+		if (e instanceof FormatError) {
+			console.log(e.message);
+		} else {
+			throw e;
 		}
 	}
-} else {
-	console.log("node pdic-conv dicFile [outputFile]");
-	process.exit();
+
+	if (encoding == 0) { // Unicode
+		fs.writeFileSync(outFile, "\ufeff" + ret, "utf16le");
+	} else { // UTF-8
+		fs.writeFileSync(outFile, ret, "utf8");
+	}
 }
 
-var ret;
-
-if (format == 0) { // CSV
-	ret = "word,trans,exp,level,memory,modify,pron";
-	readPDIC(dicFile, function (entry) {
-		ret += '\r\n"' + entry.word.replace(/"/g, '""') + '","' +
-			entry.trans.replace(/"/g, '""') + '","' +
-			(entry.exp || "").replace(/"/g, '""') + '",' +
-			(entry.level || 0) + ',' + (entry.memory || 0) + ',' + (entry.modify || 0) + ',"' +
-			(entry.pron || "").replace(/"/g, '""') + '"';
-	});
-} else if (format == 2) { // 1 line text
-	var ret = "";
-	var firstLine = true;
-	readPDIC(dicFile, function (entry) {
-		ret += (firstLine ? "" : "\r\n") + entry.word + " /// " +
-			entry.trans.replace(/\r?\n/g, " \\ ") + " / ";
-		if (entry.exp) {
-			ret += entry.exp.replace(/\r?\n/g, " \\ ");
-		}
-		firstLine = false;
-	});
-} else { // text
-	var ret = "";
-	readPDIC(dicFile, function (entry) {
-		ret += entry.word + "\r\n" + entry.trans;
-		if (entry.exp)
-			ret += " / " + entry.exp;
-		ret += "\r\n";
-	});
+class FormatError {
+	constructor(message) {
+		this.message = message;
+	}
 }
 
-if (encoding == 0) { // Unicode
-	fs.writeFileSync(outFile, "\ufeff" + ret, "utf16le");
-} else { // UTF-8
-	fs.writeFileSync(outFile, ret, "utf8");
+class SeekableFile {
+	constructor(fd) {
+		this.fd = fd;
+		this.position = 0;
+	}
+
+	read(buffer, length) {
+		fs.readSync(this.fd, buffer, 0, length, this.position);
+		this.position += length;
+	}
+
+	seek(position) {
+		this.position = position;
+	}
 }
 
 /*
@@ -119,19 +151,22 @@ if (encoding == 0) { // Unicode
  *    }
  */
 function readPDIC(file, writeEntry) {
-	var dic = fs.openSync(file, "r");
-	var headerBuf = new Buffer(256);
-	fs.readSync(dic, headerBuf, 0, 256, null);
+	let dic = new SeekableFile(fs.openSync(file, "r"));
+	let headerBuf = new Buffer(256);
+	dic.read(headerBuf, 256);
 
 	// --- header ---
-	var header = {};
+	let header = {};
 	// header.headername = headerBuf.toString("ascii", 0, 0x64);
-	// header.version = headerBuf.readInt16LE(0x8c);
+	header.version = headerBuf.readInt16LE(0x8c);
+	if (header.version >> 8 != 6) {
+		throw new FormatError("Error: 非対応のバージョンです。バージョン: 0x" + header.version.toString(16));
+	}
 	header.index_block = headerBuf.readUInt16LE(0x94);
 	// header.nword = headerBuf.readUInt32LE(0xa0);
 	header.dictype = headerBuf.readUInt8(0xa5); // 1:バイナリを圧縮, 8:BOCU-1, 64:暗号化
 	if (header.dictype & 64)
-		throw "Error: 暗号化された辞書には対応していません";
+		throw new FormatError("Error: 暗号化された辞書には対応していません");
 	// header.olenumber = headerBuf.readInt32LE(0xa8);
 	header.index_blkbit = headerBuf.readUInt8(0xb6); //0:16bit, 1:32bit
 	header.extheader = headerBuf.readUInt32LE(0xb8);
@@ -142,36 +177,36 @@ function readPDIC(file, writeEntry) {
 	// header.dicident = headerBuf.slice(0xd8,0xe0);
 
 	// --- index ---
-	var indexOffset = 1024 + header.extheader;
-	var index = new Array(header.nindex2), index_id;
-	var blockIDBuf = new Buffer(4), indexWordBuf = new Buffer(1);
-	seekSync(dic, indexOffset);
+	let indexOffset = 1024 + header.extheader;
+	let index = new Array(header.nindex2), index_id;
+	let blockIDBuf = new Buffer(4), indexWordBuf = new Buffer(1);
+	dic.seek(indexOffset);
 	for (index_id = 0; index_id < header.nindex2; index_id++) {
 		if (!header.index_blkbit) { // 16bit index
-			fs.readSync(dic, blockIDBuf, 0, 2, null);
+			dic.read(blockIDBuf, 2);
 			index[index_id] = blockIDBuf.readUInt16LE(0);
 		} else {  // 32bit index
-			fs.readSync(dic, blockIDBuf, 0, 4, null);
+			dic.read(blockIDBuf, 4);
 			index[index_id] = blockIDBuf.readUInt32LE(0);
 		}
 		do {
-			fs.readSync(dic, indexWordBuf, 0, 1, null);
+			dic.read(indexWordBuf, 1);
 		} while (indexWordBuf[0] !== 0);
 	}
 
 	// --- data block ---
-	var blockOffset = indexOffset + (header.index_block << 10);
-	var blockSpanBuf = new Buffer(2), blockSpan, fieldLengthBit;
-	var fieldLengthBuf = new Buffer(4), fieldLength;
-	var omitLengthBuf = new Buffer(1), omitLength;
-	var wordFlagBuf = new Buffer(1);
-	var fieldBuf, prevWord, fieldPtr;
-	var extFlag, extSize, extContentBuf;
-	var entry;
-	var tmp;
+	let blockOffset = indexOffset + (header.index_block << 10);
+	let blockSpanBuf = new Buffer(2), blockSpan, fieldLengthBit;
+	let fieldLengthBuf = new Buffer(4), fieldLength;
+	let omitLengthBuf = new Buffer(1), omitLength;
+	let wordFlagBuf = new Buffer(1);
+	let fieldBuf, prevWord, fieldPtr;
+	let extFlag, extSize, extContentBuf;
+	let entry;
+	let tmp;
 	for (index_id = 0; index_id < header.nindex2; index_id++) {
-		seekSync(dic, blockOffset + (index[index_id] << 10));
-		fs.readSync(dic, blockSpanBuf, 0, 2, null);
+		dic.seek(blockOffset + (index[index_id] << 10));
+		dic.read(blockSpanBuf, 2);
 		blockSpan = blockSpanBuf.readUInt16LE(0);
 		if (blockSpan === 0)
 			continue;
@@ -181,22 +216,22 @@ function readPDIC(file, writeEntry) {
 
 		while (true) {
 			if (!fieldLengthBit) { // 16bit
-				fs.readSync(dic, fieldLengthBuf, 0, 2, null);
+				dic.read(fieldLengthBuf, 2);
 				fieldLength = fieldLengthBuf.readUInt16LE(0);
 			} else { // 32bit
-				fs.readSync(dic, fieldLengthBuf, 0, 4, null);
+				dic.read(fieldLengthBuf, 4);
 				fieldLength = fieldLengthBuf.readUInt32LE(0);
 			}
 			if (fieldLength === 0)
 				break;
-			fs.readSync(dic, omitLengthBuf, 0, 1, null);
+			dic.read(omitLengthBuf, 1);
 			omitLength = omitLengthBuf[0];
-			fs.readSync(dic, wordFlagBuf, 0, 1, null);
+			dic.read(wordFlagBuf, 1);
 			if (wordFlagBuf[0] == 0xff)
 				continue; // リファレンス登録語(Ver.6.10で廃案)
 			entry = {};
 			fieldBuf = new Buffer(fieldLength);
-			fs.readSync(dic, fieldBuf, 0, fieldLength, null);
+			dic.read(fieldBuf, fieldLength);
 			tmp = sliceBufferUntilNull(fieldBuf, 0);
 			entry.word = prevWord.substr(0,omitLength) + bocu1.decode(tmp.buffer);
 			tmp = sliceBufferUntilNull(fieldBuf, tmp.next);
@@ -246,13 +281,8 @@ function readPDIC(file, writeEntry) {
 	}
 }
 
-function seekSync(fd, position) {
-	var dummy = new Buffer(1);
-	fs.readSync(fd, dummy, 0, 1, position - 1);
-}
-
 function sliceBufferUntilNull(buffer, start) {
-	var end = start;
+	let end = start;
 	while (buffer[end] !== 0){
 		end++;
 		if (end >= buffer.length)
@@ -260,3 +290,5 @@ function sliceBufferUntilNull(buffer, start) {
 	}
 	return {buffer: buffer.slice(start, end), next: end + 1};
 }
+
+main();

@@ -1,4 +1,4 @@
-# pdic-conv v0.1
+# pdic-conv v0.2
 
 PDICのDIC形式をCSVや一行テキストなどに変換できるコマンドラインツールです。
 
@@ -18,5 +18,3 @@ pdic-conv.jsの存在するフォルダでコマンドラインを開いて
 文字コード(options):
 * `-unicode` : UTF-16LE(BOM有り) PDICやTWOCなど (デフォルト)
 * `-utf8` : UTF-8(BOM無し) 幻日辞典など
-
-Copyright (c) 2015 炭酸ソーダ
