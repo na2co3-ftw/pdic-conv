@@ -1,5 +1,5 @@
 /*
- * pdic-conv.js v0.2
+ * pdic-conv.js v0.3
  *
  * Copyright (c) 2017 na2co3
  * Released under the MIT License, see:
@@ -17,22 +17,23 @@
  *   -text : テキスト形式,
  *   -1line: 1行テキスト形式
  *
+ * 詳細設定(options):
+ *   -keyword: 指定するとCSV型式でキーワードの項目を出力する
+ *
  * 文字コード(options):
  *   -unicode: UTF-16LE(BOM有り) PDICやTWOCなど (デフォルト)
- *   -utf8: UTF-8(BOM無し) 幻日辞典など
+ *   -utf8   : UTF-8(BOM無し) 幻日辞典など
  */
 
 /*
- * 未対応: 単語レベル, 暗記マーク, 修正マーク, ファイルリンクや埋め込みファイル
- *         圧縮されたバイナリ, 暗号化
+ * 未対応: 圧縮, 暗号化, ファイルリンクや埋め込みファイルやOLEオブジェクト
  */
 
 const fs = require("fs");
 const bocu1 = require("./bocu1");
 
 function main() {
-	let dicFile, outFile, format = 0, encoding = 0;
-	let match;
+	let dicFile, outFile, format = 0, encoding = 0, keyword = false;
 	if (process.argv[2]) {
 		dicFile = process.argv[2];
 		process.argv.slice(3).forEach(function (arg) {
@@ -47,12 +48,15 @@ function main() {
 					encoding = 0;
 				else if (arg == "-utf8")
 					encoding = 1;
+				else if (arg == "-keyword")
+					keyword = true;
 			}
 		});
 		if (process.argv[3] && process.argv[3].substr(0, 1) != "-") {
 			outFile = process.argv[3];
 		} else {
-			if (match = dicFile.match(/^(.*)\.[^\\\.]*$/)) {
+			let match;
+			if ((match = dicFile.match(/^(.*)\.[^\\\.]*$/)) != null) {
 				outFile = match[1] + [".csv", ".txt", ".txt"][format];
 			} else {
 				outFile = dicFile + [".csv", ".txt", ".txt"][format];
@@ -63,35 +67,48 @@ function main() {
 		process.exit();
 	}
 
-	let ret;
+	let ret = "";
 
 	try {
 		if (format == 0) { // CSV
-			ret = "word,trans,exp,level,memory,modify,pron";
+			if (keyword) {
+				ret += "keyword,";
+			}
+			ret += "word,trans,exp,level,memory,modify,pron";
+
 			readPDIC(dicFile, function (entry) {
-				ret += '\r\n"' + entry.word.replace(/"/g, '""') + '","' +
-					entry.trans.replace(/"/g, '""') + '","' +
-					(entry.exp || "").replace(/"/g, '""') + '",' +
-					(entry.level || 0) + ',' + (entry.memory || 0) + ',' + (entry.modify || 0) + ',"' +
-					(entry.pron || "").replace(/"/g, '""') + '"';
+				ret += "\r\n";
+				if (keyword) {
+					ret += `"${entry.keyword.replace(/"/g, '""')}",`;
+				}
+				ret += `"${entry.word.replace(/"/g, '""')}",`;
+				ret += `"${entry.trans.replace(/"/g, '""')}",`;
+				ret += `"${(entry.exp || "").replace(/"/g, '""')}",`;
+				ret += (entry.level || 0) + ",";
+				ret += (entry.memory ? 1 : 0) + ",";
+				ret += (entry.modify ? 1 : 0) + ",";
+				ret += `"${(entry.pron || "").replace(/"/g, '""')}"`;
 			});
 		} else if (format == 2) { // 1 line text
 			ret = "";
 			let firstLine = true;
 			readPDIC(dicFile, function (entry) {
-				ret += (firstLine ? "" : "\r\n") + entry.word + " /// " +
-					entry.trans.replace(/\r?\n/g, " \\ ") + " / ";
-				if (entry.exp) {
-					ret += entry.exp.replace(/\r?\n/g, " \\ ");
+				if (firstLine) {
+					ret += "\r\n";
+					firstLine = false;
 				}
-				firstLine = false;
+				ret += entry.word + " /// " + entry.trans.replace(/\r?\n/g, " \\ ");
+				if (entry.exp) {
+					ret += " / " + entry.exp.replace(/\r?\n/g, " \\ ");
+				}
 			});
 		} else { // text
 			ret = "";
 			readPDIC(dicFile, function (entry) {
 				ret += entry.word + "\r\n" + entry.trans;
-				if (entry.exp)
+				if (entry.exp) {
 					ret += " / " + entry.exp;
+				}
 				ret += "\r\n";
 			});
 		}
@@ -130,6 +147,10 @@ class SeekableFile {
 	seek(position) {
 		this.position = position;
 	}
+
+	skip(length) {
+		this.position += length;
+	}
 }
 
 /*
@@ -143,9 +164,9 @@ class SeekableFile {
  *     word    : 見出語
  *     trans   : 訳語
  *     exp     : 用例
- *     level   : 単語レベル (未対応)
- *     memory  : 暗記マーク (未対応)
- *     modify  : 修正マーク (未対応)
+ *     level   : 単語レベル
+ *     memory  : 暗記必須マーク
+ *     modify  : 修正マーク
  *     pron    : 発音記号
  *     linkdata: ファイルリンク又は埋め込みファイル (未対応)
  *    }
@@ -157,31 +178,33 @@ function readPDIC(file, writeEntry) {
 
 	// --- header ---
 	let header = {};
-	// header.headername = headerBuf.toString("ascii", 0, 0x64);
+	// header.headername = headerBuf.toString("ascii", 0, 100);
 	header.version = headerBuf.readInt16LE(0x8c);
 	if (header.version >> 8 != 6) {
 		throw new FormatError("Error: 非対応のバージョンです。バージョン: 0x" + header.version.toString(16));
 	}
 	header.index_block = headerBuf.readUInt16LE(0x94);
 	// header.nword = headerBuf.readUInt32LE(0xa0);
-	header.dictype = headerBuf.readUInt8(0xa5); // 1:バイナリを圧縮, 8:BOCU-1, 64:暗号化
-	if (header.dictype & 64)
+	header.dictype = headerBuf.readUInt8(0xa5); // 0x01:バイナリを圧縮, 0x08:BOCU-1, 0x40:暗号化
+	if (header.dictype & 64) {
 		throw new FormatError("Error: 暗号化された辞書には対応していません");
+	}
 	// header.olenumber = headerBuf.readInt32LE(0xa8);
 	header.index_blkbit = headerBuf.readUInt8(0xb6); //0:16bit, 1:32bit
 	header.extheader = headerBuf.readUInt32LE(0xb8);
 	// header.empty_block2 = headerBuf.readInt32LE(0xbc);
 	header.nindex2 = headerBuf.readUInt32LE(0xc0);
-	header.nblock2 = headerBuf.readUInt32LE(0xc4);
-	// header.cypt = headerBuf.slice(0xc8,0xd0);
-	// header.dicident = headerBuf.slice(0xd8,0xe0);
+	// header.nblock2 = headerBuf.readUInt32LE(0xc4);
+	// header.cypt = headerBuf.slice(0xc8, 0xc8 + 8);
+	// header.dicident = headerBuf.slice(0xd8, 0xd8 + 8);
 
 	// --- index ---
 	let indexOffset = 1024 + header.extheader;
-	let index = new Array(header.nindex2), index_id;
-	let blockIDBuf = new Buffer(4), indexWordBuf = new Buffer(1);
+	let index = new Array(header.nindex2);
+	let blockIDBuf = new Buffer(4);
+	let indexWordBuf = new Buffer(1);
 	dic.seek(indexOffset);
-	for (index_id = 0; index_id < header.nindex2; index_id++) {
+	for (let index_id = 0; index_id < header.nindex2; index_id++) {
 		if (!header.index_blkbit) { // 16bit index
 			dic.read(blockIDBuf, 2);
 			index[index_id] = blockIDBuf.readUInt16LE(0);
@@ -195,26 +218,27 @@ function readPDIC(file, writeEntry) {
 	}
 
 	// --- data block ---
-	let blockOffset = indexOffset + (header.index_block << 10);
-	let blockSpanBuf = new Buffer(2), blockSpan, fieldLengthBit;
-	let fieldLengthBuf = new Buffer(4), fieldLength;
-	let omitLengthBuf = new Buffer(1), omitLength;
+	let dataOffset = indexOffset + (header.index_block * 1024);
+	let blockSpanBuf = new Buffer(2);
+	let fieldLengthBuf = new Buffer(4);
+	let omitLengthBuf = new Buffer(1);
 	let wordFlagBuf = new Buffer(1);
-	let fieldBuf, prevWord, fieldPtr;
-	let extFlag, extSize, extContentBuf;
-	let entry;
 	let tmp;
-	for (index_id = 0; index_id < header.nindex2; index_id++) {
-		dic.seek(blockOffset + (index[index_id] << 10));
+	for (let index_id = 0; index_id < header.nindex2; index_id++) {
+		dic.seek(dataOffset + (index[index_id] * 1024));
 		dic.read(blockSpanBuf, 2);
-		blockSpan = blockSpanBuf.readUInt16LE(0);
-		if (blockSpan === 0)
+		let blockSpan = blockSpanBuf.readUInt16LE(0);
+		if (blockSpan === 0) { // 空ブロック
 			continue;
-		fieldLengthBit = !!(blockSpan & 0x8000); // 0:16bit, 1:32bit
-		blockSpan &= 0x7fff;
-		prevWord = "";
+		}
+		let fieldLengthBit = !!(blockSpan & 0x8000); // 0:16bit, 1:32bit
+		// blockSpan &= 0x7fff;
 
+		let prevRawWord = new Buffer(0);
 		while (true) {
+			let entry = {};
+
+			let fieldLength;
 			if (!fieldLengthBit) { // 16bit
 				dic.read(fieldLengthBuf, 2);
 				fieldLength = fieldLengthBuf.readUInt16LE(0);
@@ -222,31 +246,64 @@ function readPDIC(file, writeEntry) {
 				dic.read(fieldLengthBuf, 4);
 				fieldLength = fieldLengthBuf.readUInt32LE(0);
 			}
-			if (fieldLength === 0)
+			if (fieldLength === 0) {
 				break;
+			}
+
 			dic.read(omitLengthBuf, 1);
-			omitLength = omitLengthBuf[0];
+			let omitLength = omitLengthBuf[0];
+
 			dic.read(wordFlagBuf, 1);
-			if (wordFlagBuf[0] == 0xff)
+			let wordFlag = wordFlagBuf[0];
+			if (wordFlag == 0xff) {
+				dic.skip(fieldLength);
 				continue; // リファレンス登録語(Ver.6.10で廃案)
-			entry = {};
-			fieldBuf = new Buffer(fieldLength);
+			}
+			entry.memory = !!(wordFlag & 0x20);
+			entry.modify = !!(wordFlag & 0x40);
+			entry.level = wordFlag & 0x0f;
+
+			let fieldBuf = new Buffer(fieldLength);
 			dic.read(fieldBuf, fieldLength);
+
 			tmp = sliceBufferUntilNull(fieldBuf, 0);
-			entry.word = prevWord.substr(0,omitLength) + bocu1.decode(tmp.buffer);
+			tmp.buffer = Buffer.concat([prevRawWord.slice(0, omitLength), tmp.buffer]);
+			entry.word = bocu1.decode(tmp.buffer);
+			prevRawWord = tmp.buffer;
+
+			let nameSplitIndex = entry.word.indexOf("\t");
+			if (nameSplitIndex >= 0) {
+				entry.keyword = entry.word.substr(0, nameSplitIndex);
+				entry.word = entry.word.substr(nameSplitIndex + 1);
+			} else {
+				entry.keyword = entry.word;
+			}
+
 			tmp = sliceBufferUntilNull(fieldBuf, tmp.next);
 			entry.trans = bocu1.decode(tmp.buffer);
-			if (tmp.next < fieldLength) { // 拡張構成
-				fieldPtr = tmp.next;
-				while (true) {
-					extFlag = fieldBuf[fieldPtr];
-					if ((extFlag & 0xf0) === 0) { // テキストデータ
-						tmp = sliceBufferUntilNull(fieldBuf, fieldPtr + 1);
-						extContentBuf = tmp.buffer;
-						fieldPtr = tmp.next;
-					} else if (extFlag & 0x80) { //拡張終了
+
+			if (wordFlag & 0x10) { // 拡張構成
+				let fieldPtr = tmp.next;
+				while (fieldPtr < fieldBuf.length) {
+					let extFlag = fieldBuf[fieldPtr];
+					let extType = extFlag & 0x0f; //1:exp, 2:pron, 4:linkdata
+					if (extType & 0x80) {
 						break;
-					} else if (extFlag & 0x10) { // バイナリデータ
+					}
+
+					if (!(extFlag & 0x10)) { // テキストデータ
+						tmp = sliceBufferUntilNull(fieldBuf, fieldPtr + 1);
+						fieldPtr = tmp.next;
+						let content = bocu1.decode(tmp.buffer);
+						if (extType == 1) {
+							entry.exp = content;
+							continue;
+						} else if (extType == 2) {
+							entry.pron = content;
+							continue;
+						}
+					} else { // バイナリデータ
+						let extSize;
 						if (!fieldLengthBit) { // 16bit
 							extSize = fieldBuf.readUInt16LE(fieldPtr);
 							fieldPtr += 2;
@@ -254,27 +311,17 @@ function readPDIC(file, writeEntry) {
 							extSize = fieldBuf.readUInt32LE(fieldPtr);
 							fieldPtr += 4;
 						}
-						extContentBuf = fieldBuf.slice(fieldPtr, fieldPtr + extSize);
 						fieldPtr += extSize;
-						if (extFlag & 0x40) {} // 圧縮データ
-					} else { // ?
-						tmp = sliceBufferUntilNull(fieldBuf, fieldPtr + 1);
-						extContentBuf = tmp.buffer;
-						fieldPtr = tmp.next;
+
+						if (extType == 1) {
+							console.log("Notice: 訳語が圧縮されているかバイナリデータです。非対応のため無視します :" + entry.word);
+						}
 					}
-					extFlag &= 0x0f; //1:exp, 2:pron, 4:linkdata
-					if (extFlag == 1)
-						entry.exp = bocu1.decode(extContentBuf);
-					else if (extFlag == 2)
-						entry.pron = bocu1.decode(extContentBuf);
+
+					if (extType == 4) {
+						console.log("Notice: ファイルまたはオブジェクトが含まれています。非対応のため無視します :" + entry.word);
+					}
 				}
-			}
-			tmp = entry.word.indexOf("\t");
-			if (tmp >= 0) {
-				entry.keyword = entry.word.substr(0, tmp);
-				entry.word = entry.word.substr(tmp + 1);
-			} else {
-				entry.keyword = entry.word;
 			}
 			writeEntry(entry);
 		}

@@ -1,4 +1,4 @@
-# pdic-conv v0.2
+# pdic-conv v0.3
 
 PDICのDIC形式をCSVや一行テキストなどに変換できるコマンドラインツールです。
 
