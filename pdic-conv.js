@@ -1,7 +1,7 @@
 /*
- * pdic-conv.js v0.3
+ * pdic-conv.js v0.4
  *
- * Copyright (c) 2017 na2co3
+ * Copyright (c) 2015-2018 na2co3
  * Released under the MIT License, see:
  * http://opensource.org/licenses/mit-license.php
  */
@@ -38,18 +38,26 @@ function main() {
 		dicFile = process.argv[2];
 		process.argv.slice(3).forEach(function (arg) {
 			if (arg.substr(0, 1) == "-") {
-				if (arg == "-csv")
+				switch (arg) {
+				case "-csv":
 					format = 0;
-				else if (arg == "-text")
+					break;
+				case "-text":
 					format = 1;
-				else if (arg == "-1line")
+					break;
+				case "-1line":
 					format = 2;
-				else if (arg == "-unicode")
+					break;
+				case "-unicode":
 					encoding = 0;
-				else if (arg == "-utf8")
+					break;
+				case "-utf8":
 					encoding = 1;
-				else if (arg == "-keyword")
+					break;
+				case "-keyword":
 					keyword = true;
+					break;
+				}
 			}
 		});
 		if (process.argv[3] && process.argv[3].substr(0, 1) != "-") {
@@ -268,7 +276,12 @@ function readPDIC(file, writeEntry) {
 
 			tmp = sliceBufferUntilNull(fieldBuf, 0);
 			tmp.buffer = Buffer.concat([prevRawWord.slice(0, omitLength), tmp.buffer]);
-			entry.word = bocu1.decode(tmp.buffer);
+			try {
+				entry.word = bocu1.decode(tmp.buffer);
+			} catch(e) {
+				console.log(`WARNING: 見出し語のデコードに失敗しました : ${tmp.buffer.toString("hex")}`);
+				entry.word = "";
+			}
 			prevRawWord = tmp.buffer;
 
 			let nameSplitIndex = entry.word.indexOf("\t");
@@ -280,7 +293,12 @@ function readPDIC(file, writeEntry) {
 			}
 
 			tmp = sliceBufferUntilNull(fieldBuf, tmp.next);
-			entry.trans = bocu1.decode(tmp.buffer);
+			try {
+				entry.trans = bocu1.decode(tmp.buffer);
+			} catch(e) {
+				console.log(`WARNING: 訳語のデコードに失敗しました : ${entry.word} : ${tmp.buffer.toString("hex")}`);
+				entry.trans = "";
+			}
 
 			if (wordFlag & 0x10) { // 拡張構成
 				let fieldPtr = tmp.next;
@@ -290,18 +308,29 @@ function readPDIC(file, writeEntry) {
 					if (extType & 0x80) {
 						break;
 					}
+					fieldPtr++;
 
 					if (!(extFlag & 0x10)) { // テキストデータ
-						tmp = sliceBufferUntilNull(fieldBuf, fieldPtr + 1);
+						tmp = sliceBufferUntilNull(fieldBuf, fieldPtr);
 						fieldPtr = tmp.next;
-						let content = bocu1.decode(tmp.buffer);
+
+						let content;
+						try {
+							content = bocu1.decode(tmp.buffer);
+						} catch(e) {
+							console.log(`WARNING: ${extType == 1 ? "例文" : extType == 2 ? "発音" : "拡張データ(" + extType + ")"}のデコードに失敗しました : ${entry.word} : ${tmp.buffer.toString("hex")}`);
+							continue;
+						}
 						if (extType == 1) {
 							entry.exp = content;
 							continue;
 						} else if (extType == 2) {
 							entry.pron = content;
 							continue;
+						} else if (extType == 0) {
+							continue;
 						}
+						console.log(`Notice: 不明な拡張テキストデータ(${extType})が含まれています : ${entry.word} : "${content}"`)
 					} else { // バイナリデータ
 						let extSize;
 						if (!fieldLengthBit) { // 16bit
@@ -314,12 +343,14 @@ function readPDIC(file, writeEntry) {
 						fieldPtr += extSize;
 
 						if (extType == 1) {
-							console.log("Notice: 訳語が圧縮されているかバイナリデータです。非対応のため無視します :" + entry.word);
+							console.log(`Notice: 訳語が圧縮されているかバイナリデータです。非対応のため無視します : ${entry.word}`);
+						} else if (extType == 4) {
+							console.log(`Notice: ファイルまたはオブジェクトが含まれています。非対応のため無視します : ${entry.word}`);
+						} else if (extType == 0) {
+							continue;
+						} else {
+							console.log(`Notice: 不明な拡張バイナリデータ(${extType})が含まれています : ${entry.word}`)
 						}
-					}
-
-					if (extType == 4) {
-						console.log("Notice: ファイルまたはオブジェクトが含まれています。非対応のため無視します :" + entry.word);
 					}
 				}
 			}
