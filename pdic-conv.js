@@ -1,7 +1,7 @@
 /*
- * pdic-conv.js v0.4
+ * pdic-conv.js v0.5
  *
- * Copyright (c) 2015-2018 na2co3
+ * Copyright (c) 2015-2019 na2co3
  * Released under the MIT License, see:
  * http://opensource.org/licenses/mit-license.php
  */
@@ -189,13 +189,13 @@ function readPDIC(file, writeEntry) {
 	// header.headername = headerBuf.toString("ascii", 0, 100);
 	header.version = headerBuf.readInt16LE(0x8c);
 	if (header.version >> 8 != 6) {
-		throw new FormatError("Error: 非対応のバージョンです。バージョン: 0x" + header.version.toString(16));
+		throw new FormatError("Error: 辞書ファイルが正しくないか、非対応のバージョンです。バージョン: 0x" + header.version.toString(16));
 	}
 	header.index_block = headerBuf.readUInt16LE(0x94);
 	// header.nword = headerBuf.readUInt32LE(0xa0);
 	header.dictype = headerBuf.readUInt8(0xa5); // 0x01:バイナリを圧縮, 0x08:BOCU-1, 0x40:暗号化
 	if (header.dictype & 64) {
-		throw new FormatError("Error: 暗号化された辞書には対応していません");
+		throw new FormatError("Error: 辞書が暗号化されています。");
 	}
 	// header.olenumber = headerBuf.readInt32LE(0xa8);
 	header.index_blkbit = headerBuf.readUInt8(0xb6); //0:16bit, 1:32bit

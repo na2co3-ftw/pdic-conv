@@ -1,8 +1,10 @@
-# pdic-conv v0.4
+# pdic-conv v0.5
 
 PDICのDIC形式をCSVや一行テキストなどに変換できるコマンドラインツールです。
 
 使用する前に[Node.js](https://nodejs.org/ja/)をインストールしておいて下さい。
+
+PDIC/Unicode Ver.5 で作成された辞書に対応しています。
 
 ## 使い方
 pdic-conv.jsの存在するフォルダでコマンドラインを開いて  
