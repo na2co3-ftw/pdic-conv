@@ -181,7 +181,7 @@ class SeekableFile {
  */
 function readPDIC(file, writeEntry) {
 	let dic = new SeekableFile(fs.openSync(file, "r"));
-	let headerBuf = new Buffer(256);
+	let headerBuf = Buffer.alloc(256);
 	dic.read(headerBuf, 256);
 
 	// --- header ---
@@ -209,8 +209,8 @@ function readPDIC(file, writeEntry) {
 	// --- index ---
 	let indexOffset = 1024 + header.extheader;
 	let index = new Array(header.nindex2);
-	let blockIDBuf = new Buffer(4);
-	let indexWordBuf = new Buffer(1);
+	let blockIDBuf = Buffer.alloc(4);
+	let indexWordBuf = Buffer.alloc(1);
 	dic.seek(indexOffset);
 	for (let index_id = 0; index_id < header.nindex2; index_id++) {
 		if (!header.index_blkbit) { // 16bit index
@@ -227,10 +227,10 @@ function readPDIC(file, writeEntry) {
 
 	// --- data block ---
 	let dataOffset = indexOffset + (header.index_block * 1024);
-	let blockSpanBuf = new Buffer(2);
-	let fieldLengthBuf = new Buffer(4);
-	let omitLengthBuf = new Buffer(1);
-	let wordFlagBuf = new Buffer(1);
+	let blockSpanBuf = Buffer.alloc(2);
+	let fieldLengthBuf = Buffer.alloc(4);
+	let omitLengthBuf = Buffer.alloc(1);
+	let wordFlagBuf = Buffer.alloc(1);
 	let tmp;
 	for (let index_id = 0; index_id < header.nindex2; index_id++) {
 		dic.seek(dataOffset + (index[index_id] * 1024));
@@ -242,7 +242,7 @@ function readPDIC(file, writeEntry) {
 		let fieldLengthBit = !!(blockSpan & 0x8000); // 0:16bit, 1:32bit
 		// blockSpan &= 0x7fff;
 
-		let prevRawWord = new Buffer(0);
+		let prevRawWord = Buffer.alloc(0);
 		while (true) {
 			let entry = {};
 
@@ -271,7 +271,7 @@ function readPDIC(file, writeEntry) {
 			entry.modify = !!(wordFlag & 0x40);
 			entry.level = wordFlag & 0x0f;
 
-			let fieldBuf = new Buffer(fieldLength);
+			let fieldBuf = Buffer.alloc(fieldLength);
 			dic.read(fieldBuf, fieldLength);
 
 			tmp = sliceBufferUntilNull(fieldBuf, 0);

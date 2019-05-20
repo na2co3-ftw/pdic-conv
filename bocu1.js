@@ -323,7 +323,7 @@ function bocu1Encode(str, start, end) {
 		/* add lead byte */
 		dst[dp] = (lead + c) & 0xff;
 	}
-	return new Buffer(dst);
+	return Buffer.from(dst);
 }
 
 /**
