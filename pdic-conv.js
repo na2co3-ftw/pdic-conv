@@ -180,14 +180,20 @@ class SeekableFile {
  *    }
  */
 function readPDIC(file, writeEntry) {
+	const contents = fs.readFileSync(file);
+	console.log("Header: " + contents.slice(0, 256).toString("hex"));
+
 	let dic = new SeekableFile(fs.openSync(file, "r"));
 	let headerBuf = Buffer.alloc(256);
 	dic.read(headerBuf, 256);
+	console.log("Header buffer: " + headerBuf.toString("hex"));
 
 	// --- header ---
 	let header = {};
 	// header.headername = headerBuf.toString("ascii", 0, 100);
+	console.log("Version buffer: " + headerBuf.slice(0x8c, 0x8e).toString("hex"));
 	header.version = headerBuf.readInt16LE(0x8c);
+	console.log("Version: " + header.version);
 	if (header.version >> 8 != 6) {
 		throw new FormatError("Error: 辞書ファイルが正しくないか、非対応のバージョンです。バージョン: 0x" + header.version.toString(16));
 	}
